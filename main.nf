@@ -75,8 +75,6 @@ println "DEBUG saml_password loaded: ${params.saml_password ? 'YES' : 'NO'}"
 println "DEBUG saml_otp_cmd loaded: ${params.saml_otp_cmd ? 'YES' : 'NO'}"
 println "DEBUG OMERO_HOST loaded = [${params.omero_host}]"
 println "DEBUG OMERO_PORT loaded = [${params.omero_port}]"
-println "DEBUG OMERO_USER loaded = [${params.omero_username}]"
-println "DEBUG OMERO_PASSWORD loaded = [${params.omero_password ? 'YES' : 'NO'}]"
 
 workflow {
     if( !params.wsi_dir )     error "Missing --wsi_dir"
@@ -93,8 +91,6 @@ workflow {
 
     if( !params.omero_host )         error "Missing OMERO host"
     if( !params.omero_port )         error "Missing OMERO port"
-    if( !params.omero_username )     error "Missing OMERO username"
-    if( !params.omero_password )     error "Missing OMERO password"
     if( !params.omero_project_name ) error "Missing OMERO project name"
     if( !params.omero_dataset_name ) error "Missing OMERO dataset name"
 

@@ -78,9 +78,6 @@ println "DEBUG OMERO_PORT loaded = [${params.omero_port}]"
 println "DEBUG OMERO_USER loaded = [${params.omero_username}]"
 println "DEBUG OMERO_PASSWORD loaded = [${params.omero_password ? 'YES' : 'NO'}]"
 
-assert params.saml_username : "SAML_USERNAME did not load"
-assert params.saml_password : "SAML_PASSWORD did not load"
-
 workflow {
     if( !params.wsi_dir )     error "Missing --wsi_dir"
     if( !params.outdir )      error "Missing --outdir"
@@ -159,6 +156,9 @@ process RUN_WSINSIGHT {
 
     label 'wsinsight'
     tag "wsinsight"
+
+    secret 'SAML_USERNAME'
+    secret 'SAML_PASSWORD'
 
     input:
     val x
@@ -523,6 +523,9 @@ process PREPARE_OMERO_TARGET {
     label 'omero'
     tag "omero_target"
 
+    secret 'OMERO_USERNAME'
+    secret 'OMERO_PASSWORD'
+
     input:
     val x
     path project_dataset_script
@@ -550,8 +553,6 @@ process PREPARE_OMERO_TARGET {
 
     export OMERO_HOST='${params.omero_host}'
     export OMERO_PORT='${params.omero_port}'
-    export OMERO_USERNAME='${params.omero_username}'
-    export OMERO_PASSWORD='${params.omero_password}'
     export OMERO_GROUP='${params.omero_group}'
     export OMERO_PROJECT_NAME='${params.omero_project_name}'
     export OMERO_DATASET_NAME='${params.omero_dataset_name}'
@@ -559,7 +560,6 @@ process PREPARE_OMERO_TARGET {
 
     "${params.omero_python}" "${project_dataset_script}"
 
-    echo "=== target json ==="
     cat omero_target.json
     """
 }
@@ -568,6 +568,9 @@ process IMPORT_OMETIFF_TO_OMERO {
 
     label 'omero'
     tag { sample_id }
+
+    secret 'OMERO_USERNAME'
+    secret 'OMERO_PASSWORD'
 
     input:
     tuple val(sample_id), path(target_json), path(ometiff)
@@ -596,8 +599,6 @@ process IMPORT_OMETIFF_TO_OMERO {
 
     export OMERO_HOST='${params.omero_host}'
     export OMERO_PORT='${params.omero_port}'
-    export OMERO_USERNAME='${params.omero_username}'
-    export OMERO_PASSWORD='${params.omero_password}'
     export OMERO_GROUP='${params.omero_group}'
 
     DATASET_ID=\$(${params.omero_python} - <<'PY'
@@ -615,13 +616,13 @@ PY
     LOGIN_TIMEOUT='${params.omero_login_timeout}'
 
     login_omero() {
-      set +x
-      if [ -n "\$OMERO_GROUP" ]; then
-        "${params.omero_cli}" login --timeout "\$LOGIN_TIMEOUT" -g "\$OMERO_GROUP" "\${OMERO_USERNAME}@\${OMERO_HOST}:\${OMERO_PORT}"
-      else
-        "${params.omero_cli}" login --timeout "\$LOGIN_TIMEOUT" "\${OMERO_USERNAME}@\${OMERO_HOST}:\${OMERO_PORT}"
-      fi
-      set -x
+        set +x
+        if [ -n "\$OMERO_GROUP" ]; then
+            "${params.omero_cli}" login --timeout "\$LOGIN_TIMEOUT" -g "\$OMERO_GROUP" "\${OMERO_USERNAME}@\${OMERO_HOST}:\${OMERO_PORT}" -w "\$OMERO_PASSWORD"
+        else
+            "${params.omero_cli}" login --timeout "\$LOGIN_TIMEOUT" "\${OMERO_USERNAME}@\${OMERO_HOST}:\${OMERO_PORT}" -w "\$OMERO_PASSWORD"
+        fi
+        set -x
     }
 
     # Use OMERO_PASSWORD env var instead of -w to avoid shell mangling/log leakage
@@ -703,6 +704,9 @@ process ATTACH_CSV_TO_OMERO {
     label 'omero'
     tag { sample_id }
 
+    secret 'OMERO_USERNAME'
+    secret 'OMERO_PASSWORD'
+
     input:
     tuple val(sample_id), path(target_json), path(import_report), path(csv)
     path attach_csv_to_image_script
@@ -730,8 +734,6 @@ process ATTACH_CSV_TO_OMERO {
 
     export OMERO_HOST='${params.omero_host}'
     export OMERO_PORT='${params.omero_port}'
-    export OMERO_USERNAME='${params.omero_username}'
-    export OMERO_PASSWORD='${params.omero_password}'
     export OMERO_GROUP='${params.omero_group}'
 
     export IMPORT_REPORT_JSON='${import_report}'
@@ -746,51 +748,18 @@ process ATTACH_CSV_TO_OMERO {
     login_omero() {
       set +x
       if [ -n "\$OMERO_GROUP" ]; then
-        "${params.omero_cli}" login --timeout "\$LOGIN_TIMEOUT" -g "\$OMERO_GROUP" "\${OMERO_USERNAME}@\${OMERO_HOST}:\${OMERO_PORT}"
+        "${params.omero_cli}" login --timeout "\$LOGIN_TIMEOUT" -g "\$OMERO_GROUP" "\${OMERO_USERNAME}@\${OMERO_HOST}:\${OMERO_PORT}" -w "\$OMERO_PASSWORD"
       else
-        "${params.omero_cli}" login --timeout "\$LOGIN_TIMEOUT" "\${OMERO_USERNAME}@\${OMERO_HOST}:\${OMERO_PORT}"
+        "${params.omero_cli}" login --timeout "\$LOGIN_TIMEOUT" "\${OMERO_USERNAME}@\${OMERO_HOST}:\${OMERO_PORT}" -w "\$OMERO_PASSWORD"
       fi
       set -x
     }
 
-    export OMERO_PASSWORD="\$OMERO_PASSWORD"
+    login_omero
 
-    login_ok=0
-    for attempt in \$(seq 1 "\$RETRY_COUNT"); do
-      if login_omero; then
-        login_ok=1
-        break
-      fi
-      echo "OMERO login failed on attempt \$attempt/\$RETRY_COUNT; sleeping \$RETRY_SLEEP sec"
-      sleep "\$RETRY_SLEEP"
-    done
-    if [ "\$login_ok" -ne 1 ]; then
-      echo "ERROR: OMERO login failed after \$RETRY_COUNT attempts"
-      exit 92
-    fi
+    "${params.omero_python}" "${attach_csv_to_image_script}" > "\$OUT"
 
-    attach_ok=0
-    for attempt in \$(seq 1 "\$RETRY_COUNT"); do
-      set +e
-      "${params.omero_python}" "${attach_csv_to_image_script}" > "\$OUT"
-      rc=\$?
-      set -e
-      cat "\$OUT" || true
-      if [ "\$rc" -eq 0 ]; then
-        attach_ok=1
-        break
-      fi
-      echo "Attachment failed on attempt \$attempt/\$RETRY_COUNT with rc=\$rc; sleeping \$RETRY_SLEEP sec"
-      sleep "\$RETRY_SLEEP"
-      set +e
-      "${params.omero_cli}" logout >/dev/null 2>&1
-      set -e
-      login_omero
-    done
-    if [ "\$attach_ok" -ne 1 ]; then
-      echo "ERROR: CSV attach failed after \$RETRY_COUNT attempts"
-      exit 93
-    fi
+    cat "\$OUT"
 
     "${params.omero_cli}" logout || true
     """

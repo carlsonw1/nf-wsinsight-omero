@@ -43,3 +43,4 @@ __pycache__/
 # =========================
 *.ome.tiff
 *.zarr
+docker/omero/OMERO.java-*.zip
